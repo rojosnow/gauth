@@ -36,8 +36,8 @@ function gauth_login_settings() {
   );
   $form['gauth_login_prom_message'] = array(
     '#type' => 'checkbox',
-    '#title' => t('Prom message to change password on firts login.'),
-    '#description' => t('If this option is enabled a new user will see prom message to change password.'),
+    '#title' => t('Prompt message to change password on firts login.'),
+    '#description' => t('If this option is enabled a new user will see prompt message to change password.'),
     '#default_value' => variable_get('gauth_login_prom_message', TRUE),
   );
   $form['advanced_settings'] = array(
