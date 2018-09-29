@@ -1,0 +1,1714 @@
+diff --git a/LICENSE.txt b/LICENSE.txt
+old mode 100755
+new mode 100644
+diff --git a/README.txt b/README.txt
+index eb84844..06a7c8d 100755
+--- a/README.txt
++++ b/README.txt
+@@ -43,11 +43,19 @@ INSTALLATION
+ 1. Copy this module directory to your sites/all/modules or
+    sites/SITENAME/modules directory.
+ 
+-2. Download the latest release of google php client library and
++2. Download the latest release of google php client library from
++   https://github.com/google/google-api-php-client/releases and
+    extract it in libraries folder of the site, mostly located at
+    sites/all/libraries, the path is 
+   'sites/all/libraries/google-api-php-client/src..'
+-   Note that version 1.3 of this module required google-api-php-client 0.6.0 and
++
++   You may use composer to install without downloading the file which is fine.
++   The final path afer installation should be 'sites/all/libraries/google-api-php-client'
++
++   In case of normal release install it will have src folder and incase of composer it won't have that.
++
++   Note that version 1.6 is tested and will only work with google-api-php-client 2.0.0 or later,
++   version 1.3 of this module required google-api-php-client 0.6.0 and
+    1.4 is tested with 1.0.5-beta release of google-api-php-client.
+ 
+ 3. Enable the module and manage accounts at
+@@ -60,19 +68,19 @@ setting these permissions.
+ 
+ GOOGLE CONFIGURATION
+ --------------------
+-1. Visit https://code.google.com/apis/console
++1. Visit https://console.developers.google.com/project
+ 2. Create a new project with appropriate details,
+    if you don't have a project created.
+-3. Under "Services" tab enable the services which you want to use
++3. Under "Dashboard" on left sidebar click on "Use Google API" and enable the services which you want to use by clicking the links.
+    i.e. Google Analytics, etc
+-4. Open "API Access" tab.
++   You can check enabled apis as a separate tab on the page.
++4. Click on "Credentials" on the left sidebar.
+ 5. If you have not created a oauth2.0 client id then create it
+-   with appropriate details i.e. name, etc
+-6. Then on next screen select "Application type" web application.
+-7. Provide your hostname.
+-8. Edit the Client settings and change the redirect uris to
+-   "http://example.com/gauth/response_handler" and update.
+-9. Copy the client id, client secret, api key
++   with appropriate details i.e. 
++     Application Type: Web Application,
++     Name: Name of the application
++     Authorized Redirect uri's: You can copy the uri shown when you create a google oauth account in the admin settings.
++6. Copy the client id, client secret, api key
+    to configuration form of the module.
+ 
+ 
+diff --git a/gauth.admin.inc b/gauth.admin.inc
+old mode 100755
+new mode 100644
+index 7c7c651..2db07f3
+--- a/gauth.admin.inc
++++ b/gauth.admin.inc
+@@ -32,11 +32,13 @@ function theme_gauth_account_list($variables) {
+   $accounts = $variables['accounts'];
+   $header = array(
+     t('Name'),
++    t('Api key'),
+     t('Client Id'),
+-    t('Email Address'),
+     t('Client Secret'),
+     t('User'),
+     t('Services'),
++    t('Access Type'),
++    t('Redirect Url'),
+     array('data' => t('Operations'), 'colspan' => 3),
+   );
+   $rows = array();
+@@ -44,11 +46,13 @@ function theme_gauth_account_list($variables) {
+     $account_user = user_load($account->uid);
+     $row = array();
+     $row[] = $account->name;
+-    $row[] = $account->client_id;
+     $row[] = $account->developer_key;
++    $row[] = $account->client_id;
+     $row[] = $account->client_secret;
+     $row[] = l($account_user->name, "user/$account->uid");
+     $row[] = implode(", ", gauth_google_services_names($account->services));
++    $row[] = $account->access_type;
++    $row[] = '<pre>' . gauth_callback_url() . '</pre>';
+     $row[] = l(t('edit'), 'admin/config/services/gauth_account/edit/' . $account->id);
+     $row[] = l(t('delete'), 'admin/config/services/gauth_account/delete/' . $account->id);
+     $row[] = $account->is_authenticated ? l(t('Revoke'), 'gauth/revoke_token/' . $account->id) : l(t('Authenticate'), 'gauth/response_handler/' . $account->id);
+@@ -63,10 +67,6 @@ function theme_gauth_account_list($variables) {
+     );
+   }
+ 
+-  $build['google_descr'] = array(
+-    '#theme' => 'gauth_google_developers_console_help',
+-  );
+-
+   $build['pager_table'] = array(
+     '#theme' => 'table',
+     '#header' => $header,
+@@ -99,10 +99,6 @@ function gauth_account_edit_form($form, &$form_state, $id = NULL) {
+   if ($id) {
+     $account = gauth_account_load($id, FALSE);
+   }
+-
+-  $form['description'] = array(
+-    '#theme' => 'gauth_google_developers_console_help',
+-  );
+   $form['name'] = array(
+     '#type' => 'textfield',
+     '#title' => t('Account Name'),
+@@ -110,27 +106,24 @@ function gauth_account_edit_form($form, &$form_state, $id = NULL) {
+     '#default_value' => isset($account['name']) ? $account['name'] : '',
+     '#required' => TRUE,
+   );
+-  $form['client_id'] = array(
++  $form['developer_key'] = array(
+     '#type' => 'textfield',
+-    '#title' => t('Client Id'),
+-    '#description'   => t('The CLIENT ID in the "Client ID for web application"
+-      section.'),
+-    '#default_value' => isset($account['client_id']) ? $account['client_id'] : '',
++    '#title' => t('Api Key'),
++    '#description' => t('The server api key of web application.'),
++    '#default_value' => isset($account['developer_key']) ? $account['developer_key'] : '',
+     '#required' => TRUE,
+   );
+-  $form['developer_key'] = array(
++  $form['client_id'] = array(
+     '#type' => 'textfield',
+-    '#title' => t('Email Address'),
+-    '#description' => t('The EMAIL ADDRESS in the "Client ID for web
+-      application" section.'),
+-    '#default_value' => isset($account['developer_key']) ? $account['developer_key'] : '',
++    '#title' => t('Client Id'),
++    '#description' => t('The CLIENT ID in the "Client ID for web application" section.'),
++    '#default_value' => isset($account['client_id']) ? $account['client_id'] : '',
+     '#required' => TRUE,
+   );
+   $form['client_secret'] = array(
+     '#type' => 'textfield',
+     '#title' => t('Client Secret Key'),
+-    '#description' => t('The CLIENT SECRET in the "Client ID for web
+-      application" section.'),
++    '#description' => t('The CLIENT SECRET in the "Client ID for web application" section.'),
+     '#default_value' => isset($account['client_secret']) ? $account['client_secret'] : '',
+     '#required' => TRUE,
+   );
+@@ -144,6 +137,20 @@ function gauth_account_edit_form($form, &$form_state, $id = NULL) {
+     '#default_value' => isset($account['services']) ? explode(",", $account['services']) : array(),
+     '#required' => TRUE,
+   );
++  $form['access_type'] = array(
++    '#type' => 'radios',
++    '#title' => t('Access Type'),
++    '#description' => t('The Access Type of the account. Select offline if the site can perform actions even when the user is not online.'),
++    '#options' => array('offline' => t('Offline'), 'online' => t('Online')),
++    '#default_value' => isset($account['access_type']) ? $account['access_type'] : 'offline',
++  );
++  $form['callback_url'] = array(
++    '#type' => 'textfield',
++    '#title' => t('Redirect Url'),
++    '#description' => t('Copy this url and paste it in google project as a authorized redirect url.'),
++    '#default_value' => gauth_callback_url(),
++    '#attributes' => array('disabled' => 'disabled')
++  );
+   $form['uid'] = array(
+     '#type' => 'value',
+   );
+diff --git a/gauth.api.php b/gauth.api.php
+old mode 100755
+new mode 100644
+diff --git a/gauth.info b/gauth.info
+old mode 100755
+new mode 100644
+index bd51b0e..e398846
+--- a/gauth.info
++++ b/gauth.info
+@@ -3,4 +3,11 @@ description = "Google Authentication module - uses OAuth2. Provides simplified a
+ core = 7.x
+ dependencies[] = libraries
+ package = Google Api
+-configure = admin/config/services/gauth_account
+\ No newline at end of file
++configure = admin/config/services/gauth_account
++
++; Information added by Drupal.org packaging script on 2016-11-29
++version = "7.x-1.9"
++core = "7.x"
++project = "gauth"
++datestamp = "1480402089"
++
+diff --git a/gauth.install b/gauth.install
+index 7e2a90b..e49507f 100755
+--- a/gauth.install
++++ b/gauth.install
+@@ -52,6 +52,13 @@ function gauth_schema() {
+         'description' => 'The OAuth access token.',
+         'type' => 'text',
+       ),
++      'access_type' => array(
++        'description' => 'Stores the access type of the account',
++        'type' => 'varchar',
++        'length' => 255,
++        'not null' => TRUE,
++        'default' => 'offline',
++      ),
+       'is_authenticated' => array(
+         'description' => 'Is the account authenticated and ready to use?.',
+         'type' => 'int',
+@@ -102,11 +109,12 @@ function gauth_requirements($phase) {
+       'description' => '',
+       'severity' => REQUIREMENT_OK,
+     );
+-    $info = libraries_load('google-api-php-client');
+-    if (!$info['loaded']) {
++    $info = libraries_detect('google-api-php-client');
++    if (!$info['installed']) {
+       $url = l($t('here'), $info['download url']);
+-      $version = array_keys($info['versions']);
+-      $requirements['gauth']['description'] = $t('Install version "@version" of the Google api php client library code (from !here) in a libraries directory such as "sites/all/libraries/google-api-php-client."', array('@version' => $version[0], '!here' => $url));
++      $documentation = l($t('gooogle api php client installation'), 'https://github.com/google/google-api-php-client#installation');
++      $version = isset($info['versions']) && !empty($info['versions']) ? array_keys($info['versions']) : array('2.0.0');
++      $requirements['gauth']['description'] = $t('Install version "@version" or latest version of the Google api php client library code (from !here) in a libraries directory such as "sites/all/libraries/google-api-php-client". You can also use composer to install, read more at !documentation.  The path should be "sites/all/libraries/google-api-php-client"', array('@version' => $version[0], '!here' => $url, '!documentation' => $documentation));
+       $requirements['gauth']['severity'] = REQUIREMENT_ERROR;
+     }
+     else {
+@@ -132,4 +140,22 @@ function gauth_update_7002() {
+   db_update('gauth_accounts')
+     ->fields(array('uid' => 1))
+     ->execute();
++}
++
++/**
++ * Add the gauth_accounts.access_type field.
++ */
++function gauth_update_7003() {
++  $field = array(
++    'type' => 'varchar',
++    'length' => 255,
++    'not null' => TRUE,
++    'default' => 'offline',
++    'description' => 'Stores the access type of the account.',
++  );
++  db_add_field('gauth_accounts', 'access_type', $field);
++
++  db_update('gauth_accounts')
++    ->fields(array('access_type' => 'offline'))
++    ->execute();
+ }
+\ No newline at end of file
+diff --git a/gauth.module b/gauth.module
+index 8505d70..7918988 100755
+--- a/gauth.module
++++ b/gauth.module
+@@ -88,10 +88,6 @@ function gauth_menu() {
+  */
+ function gauth_theme() {
+   return array(
+-    // Theme for global Google Developers Console help message.
+-    'gauth_google_developers_console_help' => array(
+-      'variables' => array(),
+-    ),
+     // Theme functions in gauth.admin.inc.
+     'gauth_account_list' => array(
+       'variables' => array('accounts' => NULL),
+@@ -99,76 +95,37 @@ function gauth_theme() {
+   );
+ }
+ 
+-/**
+- * Google Developers Console help message used in all modules.
+- * @param array $variables
+- * @return string
+- */
+-function theme_gauth_google_developers_console_help($variables) {
+-  $build = array();
+-  $build['google_developers_console_help'] = array(
+-    '#prefix' => '<p>',
+-    '#markup' => t('The values for the fields below can be found in the
+-      <a href="@url_console" target="_blank">Google Developers Console</a>.
+-      Click on your Project Name then click API & auth, Credentials. If you
+-      don\'t have an existing account, Client ID, or project, please see the
+-      <a href="@url_help" target="_blank">Google Developers Console Help</a>.',
+-      array(
+-        '@url_console' => url('https://console.developers.google.com'),
+-        '@url_help' => url('https://developers.google.com/console/help/new'),
+-      )
+-    ),
+-    '#suffix' => '</p>',
+-  );
+-  return render($build);
+-}
+-
+ /**
+  * Implements hook_libraries_info().
+  */
+ function gauth_libraries_info() {
+-  $path = libraries_get_path('google-api-php-client');
+-  set_include_path($path."/src/" . PATH_SEPARATOR . get_include_path());
++  $config_dir = conf_path();
++  $lib_path = 'sites/all/libraries/google-api-php-client';
++  if (file_exists(DRUPAL_ROOT . '/' . $config_dir . '/libraries')) {
++    $lib_path = $config_dir . '/libraries/google-api-php-client';
++  }
++  $file_path = 'src/Google/Client.php';
++  $include_path = 'vendor/autoload.php';
++  $line_number = 42;
++  if (!file_exists(DRUPAL_ROOT . '/' . $lib_path . '/vendor')) { // Composer install;
++    $file_path = 'google/apiclient/src/Google/Client.php';
++    $include_path = 'autoload.php';
++    $line_number = 40;
++  }
+   $libraries['google-api-php-client'] = array(
+-    'name' => 'Google APIs Client Library for PHP',
+-    'vendor url' => 'https://github.com/google/google-api-php-client',
+-    'download url' => 'https://github.com/google/google-api-php-client',
++    'name' => 'Google OAuth2 Library',
++    'vendor url' => 'http://code.google.com/p/google-api-php-client',
++    'download url' => 'https://github.com/google/google-api-php-client/releases',
+     'version arguments' => array(
+-      'file' => 'src/Google/Client.php',
+-      'pattern' => '/LIBVER = "([0-9\.a-z]+)/', //LIBVER = "1.1.4";
+-      'lines' => 50,
+-    ),
+-    'versions' => array(
+-      '1.0.5-beta' => array(),
++      'file' => $file_path,
++      'pattern' => '/LIBVER = "([0-9\.a-z\-]+)/',
++      'lines' => $line_number,
+     ),
+     'files' => array(
+       'php' => array(
+-        'src/Google/Client.php',
++        $include_path,
+       ),
+     ),
+-//    'versions' => array(
+-//      '1.0.5-beta' => array(
+-//        'files' => array(
+-//          'php' => array(
+-//            'src/Google/Client.php',
+-//          ),
+-//        ),
+-//      ),
+-//      '1.1.4' => array(
+-//        'files' => array(
+-//          'php' => array(
+-//            'src/Google/Client.php',
+-//          ),
+-//        ),
+-//      ),
+-//      '1.1.5' => array(
+-//        'files' => array(
+-//          'php' => array(
+-//            'src/Google/Client.php',
+-//          ),
+-//        ),
+-//      ),
+-//    ),
+   );
+   return $libraries;
+ }
+@@ -183,6 +140,16 @@ function gauth_user_delete($user) {
+   }
+ }
+ 
++/**
++ * Implements hook_menu_site_status_alter().
++ */
++function gauth_menu_site_status_alter(&$menu_site_status, $path) {
++  if ($menu_site_status == MENU_SITE_OFFLINE && user_is_anonymous() && $path == 'gauth/response_handler') {
++    // Disable offline mode.
++    $menu_site_status = MENU_SITE_ONLINE;
++  }
++}
++
+ /**
+  * Function to handle authentication and response from google.
+  *
+@@ -208,16 +175,20 @@ function gauth_response_handler($account_id = NULL) {
+       $client->setApplicationName("Google OAuth2");
+       $client->setClientId($account['client_id']);
+       $client->setClientSecret($account['client_secret']);
+-      $client->setRedirectUri(url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)));
++      $client->setRedirectUri(gauth_callback_url());
+       $client->setDeveloperKey($account['developer_key']);
++      if ($account['access_type'] == 'offline') {
++        $client->setApprovalPrompt('force');
++      }
+       $scopes = gauth_google_services_scopes();
++      $client->setAccessType($account['access_type']);
+       foreach (explode(",", $account['services']) as $service) {
+         $client->addScope($scopes[$service]);
+       }
+     }
+     if (isset($_GET['code'])) {
+       $client->authenticate($_GET['code']);
+-      $account['access_token'] = $client->getAccessToken();
++      $account['access_token'] = json_encode($client->getAccessToken());
+       gauth_account_save($account);
+       unset($_SESSION['gauth_account_id']);
+       if (!user_access('administer site configuration') && module_exists('gauth_user')) {
+@@ -244,6 +215,7 @@ function gauth_google_services_scopes() {
+   return array(
+     'adexchangeseller' => 'https://www.googleapis.com/auth/adexchange.seller',
+     'adexchangebuyer' => 'https://www.googleapis.com/auth/adexchange.buyer',
++    'admin' => 'https://www.googleapis.com/auth/email.migration',
+     'adsense' => 'https://www.googleapis.com/auth/adsense',
+     'adsensehost' => 'https://www.googleapis.com/auth/adsensehost',
+     'analytics' => array(
+@@ -252,6 +224,21 @@ function gauth_google_services_scopes() {
+       'https://www.googleapis.com/auth/analytics.manage.users',
+       'https://www.googleapis.com/auth/analytics.provision',
+     ),
++    'androidenterprise' => 'https://www.googleapis.com/auth/androidenterprise',
++    'androidpublisher' => 'https://www.googleapis.com/auth/androidpublisher',
++    'appsactivity' => array(
++      'https://www.googleapis.com/auth/activity',
++      'https://www.googleapis.com/auth/drive',
++      'https://www.googleapis.com/auth/drive.metadata',
++      'https://www.googleapis.com/auth/drive.metadata.readonly',
++      'https://www.googleapis.com/auth/drive.readonly'
++    ),
++    'appstate' => 'https://www.googleapis.com/auth/appstate',
++    'autoscaler' => array(
++      'https://www.googleapis.com/auth/compute',
++      'https://www.googleapis.com/auth/compute.readonly'
++    ),
++    'audit' => '',
+     'bigquery' => array(
+       'https://www.googleapis.com/auth/bigquery',
+       'https://www.googleapis.com/auth/bigquery.insertdata',
+@@ -261,21 +248,141 @@ function gauth_google_services_scopes() {
+     'blogger' => 'https://www.googleapis.com/auth/blogger',
+     'books' => 'https://www.googleapis.com/auth/books',
+     'calendar' => 'https://www.googleapis.com/auth/calendar',
++    'civicinfo' => '',
++    'classroom' =>array(
++      'https://www.googleapis.com/auth/classroom.courses',
++      'https://www.googleapis.com/auth/classroom.courses.readonly',
++      'https://www.googleapis.com/auth/classroom.profile.emails',
++      'https://www.googleapis.com/auth/classroom.profile.photos',
++      'https://www.googleapis.com/auth/classroom.rosters',
++      'https://www.googleapis.com/auth/classroom.rosters.readonly'
++    ),
++    'cloudlatencytest' => 'https://www.googleapis.com/auth/monitoring.readonly',
++    'cloudmonitoring' => 'https://www.googleapis.com/auth/monitoring',
++    'cloudresourcemanager' => 'https://www.googleapis.com/auth/cloud-platform',
++    'clouduseraccounts' => array(
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/cloud.useraccounts',
++      'https://www.googleapis.com/auth/cloud.useraccounts.readonly',
++      'https://www.googleapis.com/auth/computeaccounts',
++      'https://www.googleapis.com/auth/computeaccounts.readonly'
++    ),
+     'compute' => array(
+       'https://www.googleapis.com/auth/compute',
+       'https://www.googleapis.com/auth/devstorage.full_control',
+     ),
++    'computeaccounts' => array(
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/computeaccounts',
++      'https://www.googleapis.com/auth/computeaccounts.readonly'
++    ),
++    'container' => 'https://www.googleapis.com/auth/cloud-platform',
++    'coordinate' => array(
++      'https://www.googleapis.com/auth/coordinate',
++      'https://www.googleapis.com/auth/coordinate.readonly'
++    ),
+     'customsearch' => '',
++    'dataflow' => array(
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/userinfo.email'
++    ),
++    'datastore' => array(
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/datastore',
++      'https://www.googleapis.com/auth/userinfo.email'
++    ),
++    'deploymentmanager' => array(
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/ndev.cloudman',
++      'https://www.googleapis.com/auth/ndev.cloudman.readonly'
++    ),
+     'dfareporting' => 'https://www.googleapis.com/auth/dfareporting',
++    'directory' => array(
++      'https://www.googleapis.com/auth/admin.directory.device.chromeos',
++      'https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly',
++      'https://www.googleapis.com/auth/admin.directory.device.mobile',
++      'https://www.googleapis.com/auth/admin.directory.device.mobile.action',
++      'https://www.googleapis.com/auth/admin.directory.device.mobile.readonly',
++      'https://www.googleapis.com/auth/admin.directory.group',
++      'https://www.googleapis.com/auth/admin.directory.group.member',
++      'https://www.googleapis.com/auth/admin.directory.group.member.readonly',
++      'https://www.googleapis.com/auth/admin.directory.group.readonly',
++      'https://www.googleapis.com/auth/admin.directory.notifications',
++      'https://www.googleapis.com/auth/admin.directory.orgunit',
++      'https://www.googleapis.com/auth/admin.directory.orgunit.readonly',
++      'https://www.googleapis.com/auth/admin.directory.user',
++      'https://www.googleapis.com/auth/admin.directory.user.alias',
++      'https://www.googleapis.com/auth/admin.directory.user.alias.readonly',
++      'https://www.googleapis.com/auth/admin.directory.user.readonly',
++      'https://www.googleapis.com/auth/admin.directory.user.security',
++      'https://www.googleapis.com/auth/admin.directory.userschema',
++      'https://www.googleapis.com/auth/admin.directory.userschema.readonly'
++    ),
++    'dsn' => array(
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/ndev.clouddns.readonly',
++      'https://www.googleapis.com/auth/ndev.clouddns.readwrite'
++    ),
++    'doubleclickbidmanager' => '',
++    'doubleclicksearch' => 'https://www.googleapis.com/auth/doubleclicksearch',
+     'drive' => array(
+       'https://www.googleapis.com/auth/drive',
++      'https://www.googleapis.com/auth/drive.readonly',
+       'https://www.googleapis.com/auth/drive.appdata',
+       'https://www.googleapis.com/auth/drive.file',
+       'https://www.googleapis.com/auth/drive.scripts',
+     ),
++    'exception' => '',
++    'fitness' => array(
++      'https://www.googleapis.com/auth/fitness.activity.read',
++      'https://www.googleapis.com/auth/fitness.activity.write',
++      'https://www.googleapis.com/auth/fitness.body.read',
++      'https://www.googleapis.com/auth/fitness.body.write',
++      'https://www.googleapis.com/auth/fitness.location.read',
++      'https://www.googleapis.com/auth/fitness.location.write'
++    ),
+     'freebase' => '',
+     'fustiontables' => 'https://www.googleapis.com/auth/fusiontables',
++    'games' => array(
++      'https://www.googleapis.com/auth/drive.appdata',
++      'https://www.googleapis.com/auth/games',
++      'https://www.googleapis.com/auth/plus.login'
++    ),
++    'gamesconfiguration' => 'https://www.googleapis.com/auth/androidpublisher',
++    'gamesmanagement' => array(
++      'https://www.googleapis.com/auth/games',
++      'https://www.googleapis.com/auth/plus.login'
++    ),
++    'genomics' => '',
++    'gmail' => array(
++      'https://mail.google.com',
++      'https://www.googleapis.com/auth/gmail.compose',
++      'https://www.googleapis.com/auth/gmail.insert',
++      'https://www.googleapis.com/auth/gmail.labels',
++      'https://www.googleapis.com/auth/gmail.modify',
++      'https://www.googleapis.com/auth/gmail.readonly'
++    ),
++    'groupmigration' => 'https://www.googleapis.com/auth/apps.groups.migration',
++    'groupsettings' => 'https://www.googleapis.com/auth/apps.groups.settings',
++    'identitytoolkit' => '',
+     'licensing' => '',
++    'logging' => 'https://www.googleapis.com/auth/cloud-platform',
++    'manager' => array(
++      'https://www.googleapis.com/auth/appengine.admin',
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/compute',
++      'https://www.googleapis.com/auth/devstorage.read_write',
++      'https://www.googleapis.com/auth/ndev.cloudman',
++      'https://www.googleapis.com/auth/ndev.cloudman.readonly'
++    ),
++    'mapsengine' => array(
++      'https://www.googleapis.com/auth/mapsengine',
++      'https://www.googleapis.com/auth/mapsengine.readonly'
++    ),
++    'mirror' => array(
++      'https://www.googleapis.com/auth/glass.location',
++      'https://www.googleapis.com/auth/glass.timeline'
++    ),
+     'oauth2' => array(
+       'https://www.googleapis.com/auth/plus.login',
+       'https://www.googleapis.com/auth/plus.me',
+@@ -284,13 +391,77 @@ function gauth_google_services_scopes() {
+     ),
+     'orkut' => 'https://www.googleapis.com/auth/orkut',
+     'pagespeedonline' => '',
++    'playmoviespartner' => '',
++    'plus' => array(
++      'https://www.googleapis.com/auth/plus.login',
++      'https://www.googleapis.com/auth/plus.me',
++      'https://www.googleapis.com/auth/userinfo.email',
++      'https://www.googleapis.com/auth/userinfo.profile',
++    ),
++    'plusdomains' => array(
++      'https://www.googleapis.com/auth/plus.circles.read',
++      'https://www.googleapis.com/auth/plus.circles.write',
++      'https://www.googleapis.com/auth/plus.login',
++      'https://www.googleapis.com/auth/plus.me',
++      'https://www.googleapis.com/auth/plus.media.upload',
++      'https://www.googleapis.com/auth/plus.profiles.read',
++      'https://www.googleapis.com/auth/plus.stream.read',
++      'https://www.googleapis.com/auth/plus.stream.write',
++      'https://www.googleapis.com/auth/userinfo.email',
++      'https://www.googleapis.com/auth/userinfo.profile',
++    ),
+     'prediction' => array(
+       'https://www.googleapis.com/auth/devstorage.full_control',
+       'https://www.googleapis.com/auth/prediction',
+     ),
++    'pubsub' => array(
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/pubsub'
++    ),
++    'qpxexpress' => '',
++    'replicapool' => array(
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/compute',
++      'https://www.googleapis.com/auth/compute.readonly'
++    ),
++    'replicapoolupdate' => array(
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/replicapool',
++      'https://www.googleapis.com/auth/replicapool.readonly'
++    ),
++    'reports' => array(
++      "https://www.googleapis.com/auth/admin.reports.audit.readonly",
++      "https://www.googleapis.com/auth/admin.reports.usage.readonly"
++    ),
++    'reseller' => array(
++      'https://www.googleapis.com/auth/apps.order',
++      'https://www.googleapis.com/auth/apps.order.readonly'
++    ),
++    'resource' => '',
++    'resourceviews' => array(
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/compute',
++      'https://www.googleapis.com/auth/compute.readonly',
++      'https://www.googleapis.com/auth/ndev.cloudman',
++      'https://www.googleapis.com/auth/ndev.cloudman.readonly',
++    ),
+     'shopping' => 'https://www.googleapis.com/auth/content',
+     'siteVerification' => 'https://www.googleapis.com/auth/siteverification',
+     'storage' => 'https://www.googleapis.com/auth/devstorage.full_control',
++    'spectrum' => '',
++    'sqladmin' => array(
++      'https://www.googleapis.com/auth/cloud-platform',
++      'https://www.googleapis.com/auth/sqlservice.admin'
++    ),
++    'tagmanager' => array(
++      'https://www.googleapis.com/auth/tagmanager.delete.containers',
++      'https://www.googleapis.com/auth/tagmanager.edit.containers',
++      'https://www.googleapis.com/auth/tagmanager.edit.containerversions',
++      'https://www.googleapis.com/auth/tagmanager.manage.accounts',
++      'https://www.googleapis.com/auth/tagmanager.manage.users',
++      'https://www.googleapis.com/auth/tagmanager.publish',
++      'https://www.googleapis.com/auth/tagmanager.readonly'
++    ),
+     'taskqueue' => array(
+       'https://www.googleapis.com/auth/taskqueue',
+       'https://www.googleapis.com/auth/taskqueue.consumer',
+@@ -299,6 +470,10 @@ function gauth_google_services_scopes() {
+     'translate' => '',
+     'urlshortener' => 'https://www.googleapis.com/auth/urlshortener',
+     'webfonts' => '',
++    'webmasters' => array(
++      'https://www.googleapis.com/auth/webmasters',
++      'https://www.googleapis.com/auth/webmasters.readonly'
++    ),
+     'youtube' => array(
+       'https://www.googleapis.com/auth/youtube',
+       'https://www.googleapis.com/auth/youtube.readonly',
+@@ -306,6 +481,13 @@ function gauth_google_services_scopes() {
+       'https://www.googleapis.com/auth/youtubepartner',
+       'https://www.googleapis.com/auth/youtubepartner-channel-audit',
+     ),
++    'youtubeanalytics' => array(
++      'https://www.googleapis.com/auth/youtube',
++      'https://www.googleapis.com/auth/youtube.readonly',
++      'https://www.googleapis.com/auth/youtubepartner',
++      'https://www.googleapis.com/auth/yt-analytics-monetary.readonly',
++      'https://www.googleapis.com/auth/yt-analytics.readonly'
++    )
+   );
+ }
+ 
+@@ -314,37 +496,88 @@ function gauth_google_services_scopes() {
+  */
+ function gauth_google_services_names($services = FALSE) {
+   $names = array(
+-    'adexchangeseller' => t('Google AdExchangeSeller'),
+-    'adexchangebuyer' => t('Google Adexchangebuyer'),
+-    'adsense' => t('Google AdSense'),
+-    'adsensehost' => t('Google AdSenseHost'),
++    'adexchangeseller' => t('Ad Exchange Seller'),
++    'adexchangebuyer' => t('Ad Exchange Buyer'),
++    'admin' => t('Admin Reports'),
++    'adsense' => t('AdSense Management'),
++    'adsensehost' => t('AdSense Host'),
+     'analytics' => t('Google Analytics'),
+-    'bigquery' => t('Google Bigquery'),
+-    'blogger' => t('Google Blogger'),
+-    'books' => t('Google Books'),
+-    'calendar' => t('Google Calendar'),
+-    'compute' => t('Google Compute'),
++    'androidenterprise' => t('Google Play EMM / Google Android Enterprise'),
++    'androidpublisher' => t('Google Play Developer / Google Android Publisher'),
++    'appsactivity' => t('Google Apps Activity'),
++    'appstate' => t('Google App State'),
++    'autoscaler' => t('Google Compute Engine Autoscaler / Google Auto Scaler'),
++    'audit' => t('Google Partners'),
++    'bigquery' => t('Bigquery'),
++    'blogger' => t('Blogger'),
++    'books' => t('Books'),
++    'civicinfo' => t('Google Civic Information'),
++    'calendar' => t('Calendar'),
++    'classroom' => t('Google Classroom'),
++    'cloudlatencytest' => ('Google Cloud Network Performance Monitoring /  Google Cloud Latency Test'),
++    'cloudmonitoring' => t('Cloud Monitoring'),
++    'cloudresourcemanager' => t('Google Cloud Resource Manager'),
++    'clouduseraccounts' => t('Cloud User Accounts'),
++    'compute' => t('Compute Engine'),
++    'computeaccounts' => t('Google Compute Accounts'),
++    'container' => t('Google Container Engine'),
++    'coordinate' => t('Google Maps Coordinate'),
+     'customsearch' => t('Google Customsearch'),
++    'dataflow' => t('Google Dataflow'),
++    'datastore' => t('Google Cloud Datastore'),
++    'deploymentmanager' => t('Google Deployment Manager'),
+     'dfareporting' => t('Google Dfareporting'),
++    'directory' => t('Google Directory'),
++    'dns' => t('Google Cloud DNS'),
++    'doubleclickbidmanager' => t('Google DoubleClick Bid Manager'),
++    'doubleclicksearch' => t('Google DoubleClick Search'),
+     'drive' => t('Google Drive'),
++    'exception' => t('Google Exception'),
++    'fitness' => t('Google Fitness'),
+     'freebase' => t('Google Freebase'),
+     'fusiontables' => t('Google Freebasetables'),
++    'games' => t('Google Games'),
++    'gamesconfiguration' => t('Google Games Configuration'),
++    'gamesmanagement' => t('Google Games Management'),
++    'genomics' => t('Google Genomics'),
++    'gmail' => t('Google Gmail'),
++    'groupmigration' => t('Google Group Migration'),
++    'groupsettings' => t('Google Group Settings'),
++    'identitytoolkit' => t('Google Identity Toolkit'),
+     'licensing' => t('Google Licensing'),
+-    'moderator' => t('Google Moderator'),
++    'logging' => t('Google Logging'),
++    'manager' => t('Google Manager'),
++    'mapsengine' => t('Google Maps Engine'),
++    'mirror' => t('Google Mirror'),
+     'oauth2' => t('Google Oauth2'),
+     'orkut' => t('Google Orkut'),
+     'pagespeedonline' => t('Google Pagespeedonline'),
++    'playmoviespartner' => t('Google Playy Movies Partner'),
+     'plus' => t('Google Plus'),
++    'plusdomains' => t('Google Plus Domains'),
+     'prediction' => t('Google Prediction'),
++    'pubsub' => t('Google Pub Sub'),
++    'qpxexpress' => t('Google QPXExpress'),
++    'replicapool' => t('Google Replica pool'),
++    'replicapoolupdate' => t('Google Replica pool update'),
++    'reports' => t('Google Admin Reports'),
++    'reseller' => t('Google Enterprise Apps Reseller'),
++    'resource' => t('Google Api Discovery Service'),
++    'resourceviews' => t('Google Compute Engine Instance Groups'),
+     'shopping' => t('Google Shopping'),
+     'siteVerification' => t('Google SiteVerification'),
++    'spectrum' => t('Google Spectrum Database'),
++    'sqladmin' => t('Cloud SQL Administration'),
+     'storage' => t('Google Storage'),
++    'tagmanager' => ('Tag Manager'),
+     'taskqueue' => t('Google Taskqueue'),
+     'tasks' => t('Google Tasks'),
+     'translate' => t('Google Translate'),
+     'urlshortener' => t('Google Urlshortener'),
+     'webfonts' => t('Google Webfonts'),
++    'webmasters' => t('Webmaster Tools'),
+     'youtube' => t('Google Youtube'),
++    'youtubeanalytics' => t('YouTube Analytics')
+   );
+   if (!$services) {
+     return $names;
+@@ -358,6 +591,14 @@ function gauth_google_services_names($services = FALSE) {
+   }
+ }
+ 
++/**
++ * Checks https settings and returns appropriate callback url.
++ */
++function gauth_callback_url() {
++  global $is_https;
++  return url('gauth/response_handler', array('https' => $is_https, 'absolute' => TRUE));
++}
++
+ /*** API Functions start ***/
+ /**
+  * Get an array of all accounts or load a specific account.
+@@ -452,6 +693,12 @@ function gauth_account_save(&$account) {
+           $is_authenticated = FALSE;
+         }
+       }
++      if (isset($account['access_type'])) {
++        $fields['access_type'] = check_plain($account['access_type']);
++        if ($is_authenticated && $old_account['access_type'] != $account['access_type']) {
++          $is_authenticated = FALSE;
++        }
++      }
+       $fields['is_authenticated'] = $is_authenticated;
+     }
+     // Let other modules modify the account before saving existing account.
+@@ -484,6 +731,7 @@ function gauth_account_save(&$account) {
+       'developer_key' => check_plain($account['developer_key']),
+       'client_id' => check_plain($account['client_id']),
+       'client_secret' => check_plain($account['client_secret']),
++      'access_type' => check_plain($account['access_type']),
+       'uid' => $user->uid,
+     );
+     if (is_array($account['services'])) {
+@@ -568,11 +816,39 @@ function gauth_client_get($account_id = NULL, $by_name = TRUE) {
+     $client = new Google_Client();
+     $client->setClientId($account['client_id']);
+     $client->setAccessToken($account['access_token']);
++    $client->setAccessType($account['access_type']);
+     $client->setClientSecret($account['client_secret']);
+     $client->setDeveloperKey($account['developer_key']);
++    if ($account['access_type'] == 'offline') {
++      $client->setApprovalPrompt('force');
++    }
+   }
+   $client->setApplicationName("Google OAuth2");
+-  $client->setRedirectUri(url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)));
++  $client->setRedirectUri(gauth_callback_url());
++  if ($account_id == NULL) {
++    return $client;
++  }
++  if ($client->isAccessTokenExpired()) {
++    if ($client->getRefreshToken() != '') { // Access Type is Offline
++      $client->refreshToken($client->getRefreshToken());
++      $token = $client->getAccessToken();
++      $account['access_token'] = json_encode($token);
++      drupal_write_record('gauth_accounts', $account, 'id');
++    }
++    else {
++      $names = explode('|', $account['name']);
++      if ($names[count($names)-1] == $GLOBALS['user']->uid) { // Services account
++        gauth_account_authenticate($account_id, $by_name);
++      }
++      else {
++        $client->revokeToken();
++        $account['is_authenticated'] = FALSE;
++        $account['access_token'] = '';
++        drupal_write_record('gauth_accounts', $account, 'id');
++        drupal_set_message(t('Access token is expired. If you are admin then you need to authenticate again. Consider configuring access type to offline.'));
++      }
++    }
++  }
+   return $client;
+ }
+ 
+@@ -628,4 +904,3 @@ function gauth_account_load_by_uid($uid) {
+       ->execute()
+       ->fetchField();
+ }
+-
+diff --git a/gauth_login/gauth_login.admin.inc b/gauth_login/gauth_login.admin.inc
+old mode 100755
+new mode 100644
+index ba81efc..abfdd1f
+--- a/gauth_login/gauth_login.admin.inc
++++ b/gauth_login/gauth_login.admin.inc
+@@ -11,35 +11,73 @@
+  *   An array containing form items to place on the module settings page.
+  */
+ function gauth_login_settings() {
+-  $form['gauth_login_description'] = array(
+-    '#theme' => 'gauth_google_developers_console_help',
+-  );
+   $form['gauth_login_client_id'] = array(
+-    '#type'  => 'textfield',
+-    '#title' => t('Client Id'),
+-    '#size' => 90,
+-    '#required' => TRUE,
+-    '#description' => t('The CLIENT ID in the "Client ID for web application" section.'),
++    '#type'          => 'textfield',
++    '#title'         => t('Client Id'),
++    '#required'      => TRUE,
++    '#description' => t('The client id of google account.'),
+     '#default_value' => variable_get('gauth_login_client_id', ''),
++    '#description'   => t('The CLIENT ID in the "Client ID for web application section.'),
++  );
++  $form['gauth_login_client_secret'] = array(
++    '#type'          => 'textfield',
++    '#title'         => t('Client Secret'),
++    '#required'      => TRUE,
++    '#description' => t('The client secret of google account.'),
++    '#default_value' => variable_get('gauth_login_client_secret', ''),
++    '#description'   => t('The CLIENT SECRET in the "Client ID for web application" section.'),
+   );
+   $form['gauth_login_developer_key'] = array(
+     '#type' => 'textfield',
+-    '#title' => t('Email Address'),
+-    '#size' => 90,
++    '#title' => t('Api Key'),
+     '#required' => TRUE,
+-    '#description' => t('The EMAIL ADDRESS in the "Client ID for web
+-      application" section.'),
++    '#description' => t('The server api key of the web application.'),
+     '#default_value' => variable_get('gauth_login_developer_key', ''),
+   );
+-  $form['gauth_login_client_secret'] = array(
++  $form['gauth_login_prom_message'] = array(
++    '#type' => 'checkbox',
++    '#title' => t('Prom message to change password on firts login.'),
++    '#description' => t('If this option is enabled a new user will see prom message to change password.'),
++    '#default_value' => variable_get('gauth_login_prom_message', TRUE),
++  );
++  $form['advanced_settings'] = array(
++    '#type' => 'fieldset',
++    '#title' => t('Advanced Settings'),
++    '#description' => t(''),
++    '#collapsible' => TRUE,
++    '#collapsed' => TRUE,
++  );
++  $form['advanced_settings']['gauth_login_domain_restriction'] = array(
+     '#type' => 'textfield',
+-    '#title' => t('Client Secret'),
+-    '#size' => 40,
+-    '#required' => TRUE,
+-    '#description' => t('The CLIENT SECRET in the "Client ID for web
+-      application" section.'),
+-    '#default_value' => variable_get('gauth_login_client_secret', ''),
++    '#title' => t('Restrict to Domain'),
++    '#description' => t('If you want to restrict the users from a specific domain to use loging with google insert your domain here. eg mycollege.edu. Note that this works only for Google Apps hosted accounts, also note that if some user other than this domain tries to login with google then he will face a issues. Leave this blank if you are not sure how it works as wrong configuration will break google login.'),
++    '#default_value' => variable_get('gauth_login_domain_restriction', ''),
++  );
++  $form['advanced_settings']['gauth_login_create_user'] = array(
++    '#type' => 'checkbox',
++    '#title' => t('Create new user if not found.'),
++    '#description' => t('Creates new drupal account when some new users uses login with google. If disabled will not create a new drupal account and show a message to the user.'),
++    '#default_value' => variable_get('gauth_login_create_user', TRUE),
++  );
++  $form['advanced_settings']['gauth_login_create_user_not_allowed_message'] = array(
++    '#type' => 'textfield',
++    '#title' => t('Message to be shown when create new user is disabled'),
++    '#description' => t('Type in the message which should be shown to the users when create new user is disabled and a new user uses login with google.'),
++    '#default_value' => variable_get('gauth_login_create_user_not_allowed_message', 'Can not find a user with this email. Did you use other google account while registering?'),
++    '#states' => array(
++      'visible' => array(
++        ':input[name="gauth_login_create_user"]' => array('checked' => FALSE),
++      ),
++      'required' => array(
++        ':input[name="gauth_login_create_user"]' => array('checked' => FALSE),
++      ),
++    ),
+   );
+-
+   return system_settings_form($form);
+ }
++
++function gauth_login_settings_validate($form, $form_state) {
++  if (!$form_state['values']['gauth_login_create_user'] && trim($form_state['values']['gauth_login_create_user_not_allowed_message']) == '') {
++    form_set_error('gauth_login_create_user_not_allowed_message', t('Message to be shown is a required field'));
++  }
++}
+diff --git a/gauth_login/gauth_login.api.php b/gauth_login/gauth_login.api.php
+old mode 100755
+new mode 100644
+diff --git a/gauth_login/gauth_login.css b/gauth_login/gauth_login.css
+old mode 100755
+new mode 100644
+index 0a13b78..a38ba35
+--- a/gauth_login/gauth_login.css
++++ b/gauth_login/gauth_login.css
+@@ -1,7 +1,7 @@
+ #edit-submit-google {
+-    background-size: 175px;
+-    border: none;
+-    width: 175px;
+-    height: 40px;
+-    background-image: url('sign-in-with-google.png');
+-}
+\ No newline at end of file
++    background-size:175px;
++    border:none;
++    width:175px;
++    height:40px;
++    background-image: url("sign-in-with-google.png");
++}
+diff --git a/gauth_login/gauth_login.info b/gauth_login/gauth_login.info
+old mode 100755
+new mode 100644
+index b2489c8..8e78a5e
+--- a/gauth_login/gauth_login.info
++++ b/gauth_login/gauth_login.info
+@@ -1,6 +1,13 @@
+ name = Google Login Support
+-description = "Google Authentication for login. This module provides addon feature for login to Drupal using Google."
++description = "Google Authentication for login.  This module provides addon feature for login using google"
+ core = 7.x
+ dependencies[] = gauth
+-package = Google API
+-configure = admin/config/services/gauth_login
+\ No newline at end of file
++package = Google Api
++configure = admin/config/services/gauth_login
++
++; Information added by Drupal.org packaging script on 2016-11-29
++version = "7.x-1.9"
++core = "7.x"
++project = "gauth"
++datestamp = "1480402089"
++
+diff --git a/gauth_login/gauth_login.install b/gauth_login/gauth_login.install
+index 0ccddf4..8daf8a8 100755
+--- a/gauth_login/gauth_login.install
++++ b/gauth_login/gauth_login.install
+@@ -53,4 +53,8 @@ function gauth_login_uninstall() {
+   variable_del('gauth_login_client_id');
+   variable_del('gauth_login_client_secret');
+   variable_del('gauth_login_developer_key');
++  variable_del('gauth_login_domain_restriction');
++  variable_del('gauth_login_create_user');
++  variable_del('gauth_login_create_user_not_allowed_message');
++  variable_del('gauth_login_prom_message');
+ }
+diff --git a/gauth_login/gauth_login.module b/gauth_login/gauth_login.module
+index 1d564f1..ca06d3e 100755
+--- a/gauth_login/gauth_login.module
++++ b/gauth_login/gauth_login.module
+@@ -1,7 +1,7 @@
+ <?php
+ /**
+  * @file
+- * Google Auth API for Drupal.
++ * Google Auth Api for drupal.
+  */
+ 
+ /**
+@@ -12,10 +12,10 @@ function gauth_login_help($path, $arg) {
+     case 'admin/help#gauth_login':
+       $path = $GLOBALS['base_url'] . '/' . drupal_get_path('module', 'gauth');
+       $output = '<h3>' . t('About') . '</h3>';
+-      $output .= '<p>' . t('This module allows users to log into Drupal using their Google accounts. ');
+-      $output .= t("While Drupal accounts can be created in the process, they always follow the <a href=@url>Account Settings</a>, Registration and Cancellation section.", array('@url' => url('admin/config/people/accounts'))) . '</p>';
++      $output .= '<p>' . t("This module allows users to login using their google accounts.  If a user account in drupal doesn't exist then a account is created and user gets logged in by that account or if the configuration is set to not to create a new account then the configured message is displayed to the user.  If account exists then the user gets logged in by that account.") . '</p>';
++      $output .= '<p>' . t("This module also offers a setting to restrict domains for google apps hosted accounts.  This feature don't allow users to login from a normal gmail account and restricts it to login only using the email address of the configured domain.  Admins should enable this feature understanding there own needs, as the module can't show any error or message to users from other domains.") . '</p>';
+       $output .= '<h3>' . t('Uses') . '</h3>';
+-      $output .= '<p>' . t('This module provides the option to allow end users to log into Drupal using their Google accounts.') . '</p>';
++      $output .= '<p>' . t("This module provides the option to allow end users to login using their google accounts") . '</p>';
+       return $output;
+   }
+ }
+@@ -28,7 +28,7 @@ function gauth_login_menu() {
+   $items['admin/config/services/gauth_login'] = array(
+     'title' => 'Google Login Settings',
+     'description' => 'Google Login settings.',
+-    'page callback' => 'drupal_get_form',
++    'page callback'    => 'drupal_get_form',
+     'page arguments' => array('gauth_login_settings'),
+     'access arguments' => array('administer site configuration'),
+     'file' => 'gauth_login.admin.inc',
+@@ -36,247 +36,95 @@ function gauth_login_menu() {
+   return $items;
+ }
+ 
+-/**
+- * Implements hook_libraries_info_alter().
+- */
+-function gauth_login_libraries_info_alter(&$libraries) {
+-  $libraries['google-api-php-client']['files']['php'][] = 'src/Google/Service/Oauth2.php';
+-}
+-
+-/**
+- * Helper function to check to see if an account is blocked. If so, log a
+- * message.
+- * @return boolean
+- */
+-function _gauth_login_is_user_blocked() {
+-  // Set access to the global loaded current user object.
+-  global $user;
+-
+-  // If user is blocked, set message and return to destination.
+-  if ($user->status == 0) {
+-    // Set the user message.
+-    drupal_set_message(t('Your account requires further configuration. Please contact the administrator.'), 'warning');
+-
+-    // Create a watchdog message.
+-    $message = t('Login attempted on a blocked Drupal account: %name|%email', array(
+-      '%name' => $user->name,
+-      '%email' => $user->mail,
+-    ));
+-
+-    // Watchdog log.
+-    watchdog('gauth_login', $message);
+-
+-    return TRUE;
+-  }
+-
+-  return FALSE;
+-}
+-
+ /**
+  * Implementation of hook_gauth_google_response().
+- *
+- * Follows the People, Account settings, Registration and Cancellation section
+- * with the exception of "Require e-mail verification when a visitor creates an
+- * account." Since we are logging in using Google, today, there isn't a use
+- * case that justifies implementing this setting.
+  */
+ function gauth_login_gauth_google_response() {
+-  // ** Workaround destination functionality **
+-  // Restore the destination if available. This is a workaround due to the
+-  // Authorized redirect URIs for Google OAuth not accepting a destination
+-  // parameter.
+-  $destination = variable_get('gauth_login_destination', '');
+-
+-  // Need the state. Return to destination if empty.
+-  if (empty($_GET['state'])) {
+-    drupal_goto($destination);
+-  }
+-
+-  // Return access denied if states don't match.
+-  $state = $_GET['state'];
+-  if ($state != $_SESSION['gauth_login_state']) {
+-    // Set the user message.
+-    drupal_set_message('Invalid value. Please contact your administrator.', 'error');
+-
+-    // Create a watchdog message.
+-    $message = t('State and session values do not match: %state|%session', array(
+-      '%state' => $state,
+-      '%session' => $_SESSION['gauth_login_state'],
+-    ));
+-
+-    // Watchdog log.
+-    watchdog('gauth_login', $message, array(), WATCHDOG_WARNING);
+-
+-    // Deny access.
+-    drupal_access_denied();
+-
+-    return;
+-  }
+-
+-  // If code for authentication is empty, return to destination.
+-  if (empty($_GET['code'])) {
+-    drupal_goto($destination);
+-  }
+-
+-  // Get the access token.
+-  $client_id = variable_get('gauth_login_client_id');
+-  $client_secret = variable_get('gauth_login_client_secret');
+-  $api_key = variable_get('gauth_login_developer_key');
+-  $client = new Google_Client();
+-  $client->setApplicationName('Google OAuth2');
+-  $client->setClientId($client_id);
+-  $client->setClientSecret($client_secret);
+-  $client->setRedirectUri(url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)));
+-  $client->setDeveloperKey($api_key);
+-  $scopes = gauth_google_services_scopes();
+-  $client->addScope($scopes['oauth2']);
+-  $client->authenticate($_GET['code']);
+-  $account['access_token'] = $client->getAccessToken();
+-
+-  // Get the Google account.
+-  $client = new Google_Client();
+-  $client->setApplicationName('Google OAuth2');
+-  $client->setClientId($client_id);
+-  $client->setClientSecret($client_secret);
+-  $client->setRedirectUri(url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)));
+-  $client->setDeveloperKey($api_key);
+-  $client->setAccessToken($account['access_token']);
+-  $scopes = gauth_google_services_scopes();
+-  $client->addScope($scopes['oauth2']);
+-  $oauth = new Google_Service_Oauth2($client);
+-  $info = $oauth->userinfo->get();
+-
+-  // Find the Drupal uid based upon the Google account id.
+-  $uid = gauth_login_load_google_id($info['id']);
+-
+-  // If Drupal uid found in gauth_accounts, already logged in using Google
+-  // before and Drupal uid is linked to the Google account. No Drupal user
+-  // creation required.
+-  if ($uid) {
+-    // Set the Drupal uid and try to login.
+-    $form_state = array(
+-      'uid' => $uid,
+-    );
+-    user_login_submit(array(), $form_state);
+-
+-    // See if Drupal user is blocked and log/display a message.
+-    _gauth_login_is_user_blocked();
+-
+-    // Return to destination.
+-    drupal_goto($destination);
+-  }
+-
+-  // Google account not found. Try to find an existing Drupal user to link to
+-  // this Google account. If no Drupal user found, create one...maybe.
+-  //See below.
+-
+-  // Store account variable.
+-  $account['client_id'] = variable_get('gauth_login_client_id');
+-  $account['client_secret'] = variable_get('gauth_login_client_secret');
+-  $account['developer_key'] = variable_get('gauth_login_developer_key');
+-  $account['services'] = 'oauth2';
+-  $account['is_authenticated'] = TRUE;
+-
+-  // Load an existing Drupal user using the Google account or by hooks using
+-  // hook_gauth_login_find_existing_user(). Must return a Drupal user object or
+-  // NULL.
+-  $new_user = gauth_login_find_existing_user($info);
+-
+-  // Set the password reset feature/message to false.
+-  $password_reset = FALSE;
+-
+-  // NOTE: variable_get('user_register') could return NULL for so
+-  // 0 == NULL is TRUE. This is probably ok since if user_register is NULL, it's
+-  // not set and we most likely don't want allow adding of Drupal users.
+-
+-  // If a Drupal user wasn't found and admin register only, don't create a
+-  // Drupal user. It must be done manually by an administrator per the Drupal
+-  // account settings.
+-  if (empty($new_user) && USER_REGISTER_ADMINISTRATORS_ONLY == variable_get('user_register')) {
+-    // Set the user message.
+-    drupal_set_message(t('Please contact the administrator for an account on this system.'), 'warning');
+-
+-    // Create a watchdog message.
+-    $message = t('Google login attempted by: %name|%email', array(
+-      '%name' => isset($info['name']) ? $info['name'] : 'No Name',
+-      '%email' => isset($info['email']) ? $info['email'] : 'No Email',
+-    ));
+-
+-    // Watchdog log.
+-    watchdog('gauth_login', $message);
+-
+-    // Return to destination.
+-    drupal_goto($destination);
+-  }
+-
+-  // If a Drupal user wasn't found, lets create one per the Drupal account
+-  // settings.
+-  if (empty($new_user)) {
+-    $user = new stdClass();
+-    $user->mail = $info['email'];
+-    // Make sure no duplicate names.
+-    $user->name = user_load_by_name($info['name']) ? $info['name'] . time() : $info['name'];
+-    $user->is_new = TRUE;
+-    // status = 0 handles the USER_REGISTER_VISITORS_ADMINISTRATIVE_APPROVAL
+-    // and the default case which would be...always need approval.
+-    $user->status = 0;
+-    if (USER_REGISTER_VISITORS == variable_get('user_register')) {
+-      // Visitors can register themselves.
+-      $user->status = 1;
+-      // Need to set password too.
+-      $password_reset = TRUE;
++  if (isset($_GET['state'])) {
++    $state = json_decode($_GET['state'], TRUE);
++    if (isset($state['src']) && $state['src'] != 'gauth_login') {
++      // Handle response only if the request was from gauth_login.
++      return;
+     }
+-    $new_user = user_save($user);
+-
+-    // Create a watchdog message.
+-    $message = t('Drupal account created: %name|%email|%blocked', array(
+-      '%name' => $user->name,
+-      '%email' => $user->mail,
+-      '%blocked' => $user->status ? 'Not blocked' : 'Blocked',
+-    ));
+-
+-    // Watchdog log.
+-    watchdog('gauth_login', $message, array(), WATCHDOG_INFO);
+-  }
+-
+-  // Set the Drupal uid from the user object.
+-  $uid = $new_user->uid;
+-
+-  // Set the Drupal uid and try to login.
+-  $form_state = array(
+-    'uid' => $uid,
+-  );
+-  user_login_submit(array(), $form_state);
+-
+-  // If the Drupal user is blocked, goto to the destination and don't continue
+-  // processing.
+-  if (_gauth_login_is_user_blocked()) {
+-    drupal_goto($destination);
+-  }
+-
+-  // Only prompt for a password reset only if visitors can register
+-  // themselves. Otherwise, once the admin gives approval (unblocked),
+-  // have them do a password reset.
+-  if ($password_reset) {
+-    $token = drupal_hash_base64(drupal_random_bytes(55));
+-    $_SESSION['pass_reset_' . $uid] = $token;
+-    drupal_set_message(t("Click <a href=@url target=_blank>here</a> to set a password for your account.", array('@url' => url('user/' . $uid . '/edit', array('query' => array('pass-reset-token' => $token))))), 'warning');
++    if ($state['hash'] != $_SESSION['gauth_login_state']['hash']) {
++      drupal_set_message(t('Invalid state parameter'), 'error');
++      drupal_access_denied();
++      return;
++    }
++    $redirect_url = isset($state['destination']) ? $state['destination'] : '';
++    if (isset($_GET['code'])) {
++      $client_id = variable_get('gauth_login_client_id');
++      $client_secret = variable_get('gauth_login_client_secret');
++      $api_key = variable_get('gauth_login_developer_key');
++      $client = new Google_Client();
++      $client->setApplicationName("Google OAuth2");
++      $client->setClientId($client_id);
++      $client->setClientSecret($client_secret);
++      $client->setRedirectUri(gauth_callback_url());
++      $client->setDeveloperKey($api_key);
++      $client->setApprovalPrompt('force');
++      $scopes = gauth_google_services_scopes();
++      $client->addScope($scopes['oauth2']);
++      $client->authenticate($_GET['code']);
++      $account['access_token'] = json_encode($client->getAccessToken());
++
++      $client = new Google_Client();
++      $client->setApplicationName("Google OAuth2");
++      $client->setClientId($client_id);
++      $client->setClientSecret($client_secret);
++      $client->setRedirectUri(gauth_callback_url());
++      $client->setDeveloperKey($api_key);
++      $client->setApprovalPrompt('force');
++      $client->setAccessToken($account['access_token']);
++      $scopes = gauth_google_services_scopes();
++      $client->addScope($scopes['oauth2']);
++      $oauth = new Google_Service_Oauth2($client);
++      $info = $oauth->userinfo->get();
++      if ($uid = gauth_login_load_google_id($info['id'])) {
++        $form_state['uid'] = $uid;
++        user_login_submit(array(), $form_state);
++      }
++      else {
++        $account['client_id'] = variable_get('gauth_login_client_id');
++        $account['client_secret'] = variable_get('gauth_login_client_secret');
++        $account['developer_key'] = variable_get('gauth_login_developer_key');
++        $account['services'] = 'oauth2';
++        $account['is_authenticated'] = TRUE;
++
++        if (!$new_user = gauth_login_find_existing_user($info)) {
++          if (variable_get('gauth_login_create_user', TRUE)) {
++            $user = new stdClass();
++            $user->mail = $info['email'];
++            $user->name = user_load_by_name($info['name']) ? $info['name'] . time() : $info['name'];
++            $user->is_new = TRUE;
++            $user->status = 1;
++            $new_user = user_save($user);
++          }
++          else {
++            drupal_set_message(t(variable_get('gauth_login_create_user_not_allowed_message', 'Can not find a user with this email. Did you use other google account while registering?')));
++            drupal_goto('user/login');
++          }
++        }
++        $form_state['uid'] = $new_user->uid;
++        user_login_submit(array(), $form_state);
++        global $user;
++        $token = drupal_hash_base64(drupal_random_bytes(55));
++        $_SESSION['pass_reset_' . $user->uid] = $token;
++        if (variable_get('gauth_login_prom_message', TRUE)) {
++          drupal_set_message(t("Click <a href='!url' target=_blank>here</a> to set password", array('!url' => url('user/' . $user->uid . '/edit', array('query' => array('pass-reset-token' => $token))))), 'warning');
++        }
++        $gauth_login = array(
++          'google_id' => $info['id'],
++          'uid' => $user->uid
++        );
++        drupal_write_record('gauth_login', $gauth_login);
++        $account['name'] = 'Gauth Login ' . $user->uid;
++        $account['uid'] = $user->uid;
++        drupal_write_record('gauth_accounts', $account);
++      }
++    }
++    drupal_goto($redirect_url);
+   }
+-
+-  // Save the Drupal user to Google account link to the gauth_login table.
+-  $gauth_login = array(
+-    'google_id' => $info['id'],
+-    'uid' => $uid
+-  );
+-  drupal_write_record('gauth_login', $gauth_login);
+-
+-  // Save Google account data to the gauth_accounts table.
+-  $account['name'] = 'Gauth Login ' . $uid;
+-  $account['uid'] = $uid;
+-  drupal_write_record('gauth_accounts', $account);
+-
+-  // Return to destination.
+-  drupal_goto($destination);
+ }
+ 
+ /**
+@@ -319,7 +167,7 @@ function gauth_login_form_alter(&$form, &$form_state, $form_id) {
+ }
+ 
+ /**
+- * Login using Google, submit handler.
++ * Login using google, submit handler
+  */
+ function gauth_login_user_login_submit() {
+   if (variable_get('gauth_login_client_id', FALSE)) {
+@@ -332,32 +180,32 @@ function gauth_login_user_login_submit() {
+     $client->setApplicationName("Google OAuth2");
+     $client->setClientId(variable_get('gauth_login_client_id'));
+     $client->setClientSecret(variable_get('gauth_login_client_secret'));
+-    $client->setRedirectUri(url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)));
++    $client->setRedirectUri(gauth_callback_url());
+     $client->setDeveloperKey(variable_get('gauth_login_developer_key'));
+     $scopes = gauth_google_services_scopes();
+     $client->addScope($scopes['oauth2']);
+     if (!isset($_SESSION['gauth_login_state'])) {
+-      $state = md5(rand());
++      $state = array(
++        'src' => 'gauth_login',
++        'hash' => md5(rand())
++      );
++      if (isset($_GET['destination'])) {
++        $state['destination'] = $_GET['destination'];
++        unset($_GET['destination']);
++      }
+     }
+     else {
+       $state = $_SESSION['gauth_login_state'];
+     }
+     $_SESSION['gauth_login_state'] = $state;
++    $state = drupal_json_encode($state);
+     $client->setState($state);
+-    $url = 'https://accounts.google.com/o/oauth2/auth?response_type=code&redirect_uri=' . url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)) . '&client_id=' . variable_get('gauth_login_client_id') . '&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&access_type=offline&state=' . $_SESSION['gauth_login_state'];
+-    // ** Workaround destination functionality **
+-    // Since the Authorized redirect URIs for Google OAuth will not work with
+-    // the destination query parameter (meaning adding ?destination=node/3 to
+-    // the redirect_uri), we need to simulate the goto destination by storing
+-    // the URI. Then, in hook_gauth_google_response(), use the variable to
+-    // set the destination.
+-    if (isset($_GET['destination'])) {
+-      variable_set('gauth_login_destination', $_GET['destination']);
+-      unset($_GET['destination']);
+-    }
+-    else {
+-      variable_set('gauth_login_destination', NULL);
++
++    $url = $client->createAuthUrl();
++    if ($restrict_domain = variable_get('gauth_login_domain_restriction', FALSE)) {
++      $url .= '&hd=' . $restrict_domain;
+     }
++
+     drupal_goto($url);
+   }
+   else {
+@@ -366,9 +214,7 @@ function gauth_login_user_login_submit() {
+ }
+ 
+ /**
+- * Function returns uid & name of passed Google ID.
+- * @param $id
+- * @return int|bool
++ * Function returns uid of passed google id
+  */
+ function gauth_login_load_google_id($id) {
+   $rs = db_select('gauth_login', 'gl')
+@@ -380,7 +226,7 @@ function gauth_login_load_google_id($id) {
+ }
+ 
+ /**
+- * Implementation of hook_user_delete().
++ * Implmenentation of hook_user_delete();
+  */
+ function gauth_login_user_delete($user) {
+   db_delete('gauth_login')
+diff --git a/gauth_login/sign-in-with-google.png b/gauth_login/sign-in-with-google.png
+old mode 100755
+new mode 100644
+diff --git a/gauth_user/gauth_user.admin.inc b/gauth_user/gauth_user.admin.inc
+old mode 100755
+new mode 100644
+index 5200513..1417a6c
+--- a/gauth_user/gauth_user.admin.inc
++++ b/gauth_user/gauth_user.admin.inc
+@@ -33,20 +33,22 @@ function theme_gauth_user_services_list($variables) {
+   $accounts = $variables['accounts'];
+   $header = array(
+     t('Name'),
++    t('Api key'),
+     t('Client Id'),
+-    t('Email Address'),
+     t('Client Secret'),
+     t('Services'),
++    t('Access Type'),
+     array('data' => t('Operations'), 'colspan' => 2),
+   );
+   $rows = array();
+   foreach ($accounts as $account) {
+     $row = array();
+     $row[] = $account->name;
+-    $row[] = $account->client_id;
+     $row[] = $account->developer_key;
++    $row[] = $account->client_id;
+     $row[] = $account->client_secret;
+     $row[] = implode(", ", gauth_google_services_names($account->services));
++    $row[] = $account->access_type;
+     $row[] = l(t('edit'), 'admin/config/services/gauth_user/edit/' . $account->id);
+     $row[] = l(t('delete'), 'admin/config/services/gauth_user/delete/' . $account->id);
+     $rows[] = $row;
+@@ -59,11 +61,6 @@ function theme_gauth_user_services_list($variables) {
+       ),
+     );
+   }
+-
+-  $build['google_descr'] = array(
+-    '#theme' => 'gauth_google_developers_console_help',
+-  );
+-
+   $build['pager_table'] = array(
+     '#theme' => 'table',
+     '#header' => $header,
+@@ -102,9 +99,6 @@ function gauth_user_services_edit_form($form, &$form_state, $id = NULL) {
+       '#value' => TRUE,
+     );
+   }
+-  $form['description'] = array(
+-    '#theme' => 'gauth_google_developers_console_help',
+-  );
+   $form['name'] = array(
+     '#type' => 'textfield',
+     '#title' => t('Account Name'),
+@@ -123,27 +117,24 @@ function gauth_user_services_edit_form($form, &$form_state, $id = NULL) {
+     ),
+     '#description' => t('A unique machine-readable name for this service account. It must only contain lowercase letters, numbers, and underscores.'),
+   );
+-  $form['client_id'] = array(
++  $form['developer_key'] = array(
+     '#type' => 'textfield',
+-    '#title' => t('Client Id'),
+-    '#description'   => t('The CLIENT ID in the "Client ID for web application"
+-      section.'),
+-    '#default_value' => isset($account['client_id']) ? $account['client_id'] : '',
++    '#title' => t('Api Key'),
++    '#description' => t('The server api key of the web application.'),
++    '#default_value' => isset($account['developer_key']) ? $account['developer_key'] : '',
+     '#required' => TRUE,
+   );
+-  $form['developer_key'] = array(
++  $form['client_id'] = array(
+     '#type' => 'textfield',
+-    '#title' => t('Email Address'),
+-    '#description' => t('The EMAIL ADDRESS in the "Client ID for web
+-      application" section.'),
+-    '#default_value' => isset($account['developer_key']) ? $account['developer_key'] : '',
++    '#title' => t('Client Id'),
++    '#description' => t('The CLIENT ID in the "Client ID for web application" section.'),
++    '#default_value' => isset($account['client_id']) ? $account['client_id'] : '',
+     '#required' => TRUE,
+   );
+   $form['client_secret'] = array(
+     '#type' => 'textfield',
+     '#title' => t('Client Secret Key'),
+-    '#description' => t('The CLIENT SECRET in the "Client ID for web
+-      application" section.'),
++    '#description' => t('The CLIENT SECRET in the "Client ID for web application" section.'),
+     '#default_value' => isset($account['client_secret']) ? $account['client_secret'] : '',
+     '#required' => TRUE,
+   );
+@@ -157,6 +148,13 @@ function gauth_user_services_edit_form($form, &$form_state, $id = NULL) {
+     '#default_value' => isset($account['services']) ? explode(",", $account['services']) : array(),
+     '#required' => TRUE,
+   );
++  $form['access_type'] = array(
++    '#type' => 'radios',
++    '#title' => t('Access Type'),
++    '#description' => t('The Access Type of the account. Select offline if the site can perform actions even when the user is not online.'),
++    '#options' => array('offline' => t('Offline'), 'online' => t('Online')),
++    '#default_value' => isset($account['access_type']) ? $account['access_type'] : '',
++  );
+   $form['submit'] = array(
+     '#type' => 'submit',
+     '#value' => t('Save'),
+diff --git a/gauth_user/gauth_user.info b/gauth_user/gauth_user.info
+old mode 100755
+new mode 100644
+index cfb1481..111ae31
+--- a/gauth_user/gauth_user.info
++++ b/gauth_user/gauth_user.info
+@@ -3,4 +3,11 @@ description = "Google Authentication for end user.  This module provides addon f
+ core = 7.x
+ dependencies[] = gauth
+ package = Google Api
+-configure = admin/config/services/gauth_user
+\ No newline at end of file
++configure = admin/config/services/gauth_user
++
++; Information added by Drupal.org packaging script on 2016-11-29
++version = "7.x-1.9"
++core = "7.x"
++project = "gauth"
++datestamp = "1480402089"
++
+diff --git a/gauth_user/gauth_user.install b/gauth_user/gauth_user.install
+old mode 100755
+new mode 100644
+index f4f6bba..14b7d7e
+--- a/gauth_user/gauth_user.install
++++ b/gauth_user/gauth_user.install
+@@ -47,6 +47,13 @@ function gauth_user_schema() {
+         'description' => 'Services which will be enabled for this account.',
+         'type' => 'text',
+       ),
++      'access_type' => array(
++        'description' => 'Stores the access type of the account',
++        'type' => 'varchar',
++        'length' => 255,
++        'not null' => TRUE,
++        'default' => 'offline',
++      ),
+     ),
+     'primary key' => array('id'),
+     'unique keys' => array(
+@@ -70,3 +77,21 @@ function gauth_user_install() {
+ function gauth_user_uninstall() {
+   drupal_uninstall_schema('gauth_user_services');
+ }
++
++/**
++ * Add the gauth_accounts.access_type field.
++ */
++function gauth_user_update_7001() {
++  $field = array(
++    'type' => 'varchar',
++    'not null' => TRUE,
++    'length' => 255,
++    'default' => 'offline',
++    'description' => 'Stores the access type of the account.',
++  );
++  db_add_field('gauth_user_services', 'access_type', $field);
++
++  db_update('gauth_user_services')
++    ->fields(array('access_type' => 'offline'))
++    ->execute();
++}
+\ No newline at end of file
+diff --git a/gauth_user/gauth_user.module b/gauth_user/gauth_user.module
+old mode 100755
+new mode 100644
+index 70dca3e..2f88dec
+--- a/gauth_user/gauth_user.module
++++ b/gauth_user/gauth_user.module
+@@ -196,6 +196,9 @@ function gauth_user_services_save(&$account) {
+       }
+       $fields['services'] = check_plain($account['services']);
+     }
++    if (isset($account['access_type'])) {
++      $fields['access_type'] = $account['access_type'];
++    }
+     if (drupal_write_record('gauth_user_services', $fields, 'id') == SAVED_UPDATED) {
+       return $fields;
+     }
+@@ -219,6 +222,7 @@ function gauth_user_services_save(&$account) {
+       'developer_key' => check_plain($account['developer_key']),
+       'client_id' => check_plain($account['client_id']),
+       'client_secret' => check_plain($account['client_secret']),
++      'access_type' => $account['access_type'],
+     );
+     if (is_array($account['services'])) {
+       $account['services'] = implode(",", $account['services']);
+@@ -323,4 +327,4 @@ function gauth_user_services_types($id = NULL) {
+     $return = entity_key_array_by_property($accounts, 'id');
+   }
+   return $return;
+-}
+\ No newline at end of file
++}
+diff --git a/gauth_user/gauth_user.pages.inc b/gauth_user/gauth_user.pages.inc
+old mode 100755
+new mode 100644
+index 314e907..ddda24a
+--- a/gauth_user/gauth_user.pages.inc
++++ b/gauth_user/gauth_user.pages.inc
+@@ -35,7 +35,8 @@ function theme_gauth_user_services_authenticate_list($variables) {
+   foreach ($accounts as $account) {
+     $row = array();
+     $row[] = $account->name;
+-    if ($GLOBALS['user']->uid == arg(1)) {
++    $me = (module_exists('me') && arg(1) == 'me');
++    if ($GLOBALS['user']->uid == arg(1) || $me) {
+       $row[] = isset($account->is_authenticated) ? ($account->is_authenticated ? l(t('Revoke'), 'user/' . arg(1) . '/gauth_user/revoke/' . $account->id) : l(t('Authenticate'), 'gauth/response_handler/' . $account->id)) : l(t('Create and Authenticate'), 'user/' . arg(1) . '/gauth_user/add_authenticate/' . $account->id) ;
+       $row[] = isset($account->is_authenticated) ? l(t('Delete'), 'user/' . arg(1) . '/gauth_user/delete/' . $account->id) : '';
+       $header[] = array('data' => t('Operations'), 'colspan' => 2);
+@@ -61,6 +62,7 @@ function gauth_user_services_user_account_create($type) {
+     'developer_key' => $account['developer_key'],
+     'services' => $account['services'],
+     'name' => $type . '|' . $GLOBALS['user']->uid,
++    'access_type' => $account['access_type'],
+   );
+   gauth_account_save($gauth_account);
+   gauth_account_authenticate($type . '|' . $GLOBALS['user']->uid, TRUE);
+diff --git a/google-api-php-client.libraries.info b/google-api-php-client.libraries.info
+old mode 100755
+new mode 100644
+index 11bfff7..1cd614f
+--- a/google-api-php-client.libraries.info
++++ b/google-api-php-client.libraries.info
+@@ -2,4 +2,11 @@ name = Google OAuth2
+ machine name = google-api-php-client
+ description = Provides classes for google oauth2 for php
+ version = 1.0.6-beta5
+-files[php][] = src/Google/Client.php
+\ No newline at end of file
++files[php][] = src/Google/Client.php
++
++; Information added by Drupal.org packaging script on 2016-11-29
++version = "7.x-1.9"
++core = "7.x"
++project = "gauth"
++datestamp = "1480402089"
++

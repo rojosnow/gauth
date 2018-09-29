@@ -43,11 +43,19 @@ INSTALLATION
 1. Copy this module directory to your sites/all/modules or
    sites/SITENAME/modules directory.
 
-2. Download the latest release of google php client library and
+2. Download the latest release of google php client library from
+   https://github.com/google/google-api-php-client/releases and
    extract it in libraries folder of the site, mostly located at
    sites/all/libraries, the path is 
   'sites/all/libraries/google-api-php-client/src..'
-   Note that version 1.3 of this module required google-api-php-client 0.6.0 and
+
+   You may use composer to install without downloading the file which is fine.
+   The final path afer installation should be 'sites/all/libraries/google-api-php-client'
+
+   In case of normal release install it will have src folder and incase of composer it won't have that.
+
+   Note that version 1.6 is tested and will only work with google-api-php-client 2.0.0 or later,
+   version 1.3 of this module required google-api-php-client 0.6.0 and
    1.4 is tested with 1.0.5-beta release of google-api-php-client.
 
 3. Enable the module and manage accounts at
@@ -60,19 +68,19 @@ setting these permissions.
 
 GOOGLE CONFIGURATION
 --------------------
-1. Visit https://code.google.com/apis/console
+1. Visit https://console.developers.google.com/project
 2. Create a new project with appropriate details,
    if you don't have a project created.
-3. Under "Services" tab enable the services which you want to use
+3. Under "Dashboard" on left sidebar click on "Use Google API" and enable the services which you want to use by clicking the links.
    i.e. Google Analytics, etc
-4. Open "API Access" tab.
+   You can check enabled apis as a separate tab on the page.
+4. Click on "Credentials" on the left sidebar.
 5. If you have not created a oauth2.0 client id then create it
-   with appropriate details i.e. name, etc
-6. Then on next screen select "Application type" web application.
-7. Provide your hostname.
-8. Edit the Client settings and change the redirect uris to
-   "http://example.com/gauth/response_handler" and update.
-9. Copy the client id, client secret, api key
+   with appropriate details i.e. 
+     Application Type: Web Application,
+     Name: Name of the application
+     Authorized Redirect uri's: You can copy the uri shown when you create a google oauth account in the admin settings.
+6. Copy the client id, client secret, api key
    to configuration form of the module.
 
 
