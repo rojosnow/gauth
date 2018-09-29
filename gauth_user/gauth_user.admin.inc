@@ -33,8 +33,8 @@ function theme_gauth_user_services_list($variables) {
   $accounts = $variables['accounts'];
   $header = array(
     t('Name'),
-    t('Api key'),
     t('Client Id'),
+    t('Email Address'),
     t('Client Secret'),
     t('Services'),
     array('data' => t('Operations'), 'colspan' => 2),
@@ -43,8 +43,8 @@ function theme_gauth_user_services_list($variables) {
   foreach ($accounts as $account) {
     $row = array();
     $row[] = $account->name;
-    $row[] = $account->developer_key;
     $row[] = $account->client_id;
+    $row[] = $account->developer_key;
     $row[] = $account->client_secret;
     $row[] = implode(", ", gauth_google_services_names($account->services));
     $row[] = l(t('edit'), 'admin/config/services/gauth_user/edit/' . $account->id);
@@ -59,6 +59,11 @@ function theme_gauth_user_services_list($variables) {
       ),
     );
   }
+
+  $build['google_descr'] = array(
+    '#theme' => 'gauth_google_developers_console_help',
+  );
+
   $build['pager_table'] = array(
     '#theme' => 'table',
     '#header' => $header,
@@ -97,6 +102,9 @@ function gauth_user_services_edit_form($form, &$form_state, $id = NULL) {
       '#value' => TRUE,
     );
   }
+  $form['description'] = array(
+    '#theme' => 'gauth_google_developers_console_help',
+  );
   $form['name'] = array(
     '#type' => 'textfield',
     '#title' => t('Account Name'),
@@ -115,24 +123,27 @@ function gauth_user_services_edit_form($form, &$form_state, $id = NULL) {
     ),
     '#description' => t('A unique machine-readable name for this service account. It must only contain lowercase letters, numbers, and underscores.'),
   );
-  $form['developer_key'] = array(
-    '#type' => 'textfield',
-    '#title' => t('Api Key'),
-    '#description' => t('The api key of google account.'),
-    '#default_value' => isset($account['developer_key']) ? $account['developer_key'] : '',
-    '#required' => TRUE,
-  );
   $form['client_id'] = array(
     '#type' => 'textfield',
     '#title' => t('Client Id'),
-    '#description' => t('The client id of google account.'),
+    '#description'   => t('The CLIENT ID in the "Client ID for web application"
+      section.'),
     '#default_value' => isset($account['client_id']) ? $account['client_id'] : '',
+    '#required' => TRUE,
+  );
+  $form['developer_key'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Email Address'),
+    '#description' => t('The EMAIL ADDRESS in the "Client ID for web
+      application" section.'),
+    '#default_value' => isset($account['developer_key']) ? $account['developer_key'] : '',
     '#required' => TRUE,
   );
   $form['client_secret'] = array(
     '#type' => 'textfield',
     '#title' => t('Client Secret Key'),
-    '#description' => t('The client secrets key of google account.'),
+    '#description' => t('The CLIENT SECRET in the "Client ID for web
+      application" section.'),
     '#default_value' => isset($account['client_secret']) ? $account['client_secret'] : '',
     '#required' => TRUE,
   );
@@ -140,7 +151,7 @@ function gauth_user_services_edit_form($form, &$form_state, $id = NULL) {
   $form['services'] = array(
     '#type' => 'select',
     '#title' => t('Services'),
-    '#description' => t('Services that will be enabled to be used by this account'),
+    '#description' => t('Services that will be enabled to be used by this account.'),
     '#options' => $options,
     '#multiple' => TRUE,
     '#default_value' => isset($account['services']) ? explode(",", $account['services']) : array(),

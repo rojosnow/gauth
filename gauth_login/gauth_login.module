@@ -1,7 +1,7 @@
 <?php
 /**
  * @file
- * Google Auth Api for drupal.
+ * Google Auth API for Drupal.
  */
 
 /**
@@ -12,9 +12,10 @@ function gauth_login_help($path, $arg) {
     case 'admin/help#gauth_login':
       $path = $GLOBALS['base_url'] . '/' . drupal_get_path('module', 'gauth');
       $output = '<h3>' . t('About') . '</h3>';
-      $output .= '<p>' . t("This module allows users to login using their google accounts.  If a user account in drupal doesn't exist then a account is created and user gets logged in by that account.  If account exists then the user gets logged in by that account.") . '</p>';
+      $output .= '<p>' . t('This module allows users to log into Drupal using their Google accounts. ');
+      $output .= t("While Drupal accounts can be created in the process, they always follow the <a href=@url>Account Settings</a>, Registration and Cancellation section.", array('@url' => url('admin/config/people/accounts'))) . '</p>';
       $output .= '<h3>' . t('Uses') . '</h3>';
-      $output .= '<p>' . t("This module provides the option to allow end users to login using their google accounts") . '</p>';
+      $output .= '<p>' . t('This module provides the option to allow end users to log into Drupal using their Google accounts.') . '</p>';
       return $output;
   }
 }
@@ -26,8 +27,8 @@ function gauth_login_menu() {
   $items = array();
   $items['admin/config/services/gauth_login'] = array(
     'title' => 'Google Login Settings',
-    'description' => 'Google Account settings.',
-    'page callback'    => 'drupal_get_form',
+    'description' => 'Google Login settings.',
+    'page callback' => 'drupal_get_form',
     'page arguments' => array('gauth_login_settings'),
     'access arguments' => array('administer site configuration'),
     'file' => 'gauth_login.admin.inc',
@@ -43,75 +44,239 @@ function gauth_login_libraries_info_alter(&$libraries) {
 }
 
 /**
+ * Helper function to check to see if an account is blocked. If so, log a
+ * message.
+ * @return boolean
+ */
+function _gauth_login_is_user_blocked() {
+  // Set access to the global loaded current user object.
+  global $user;
+
+  // If user is blocked, set message and return to destination.
+  if ($user->status == 0) {
+    // Set the user message.
+    drupal_set_message(t('Your account requires further configuration. Please contact the administrator.'), 'warning');
+
+    // Create a watchdog message.
+    $message = t('Login attempted on a blocked Drupal account: %name|%email', array(
+      '%name' => $user->name,
+      '%email' => $user->mail,
+    ));
+
+    // Watchdog log.
+    watchdog('gauth_login', $message);
+
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+/**
  * Implementation of hook_gauth_google_response().
+ *
+ * Follows the People, Account settings, Registration and Cancellation section
+ * with the exception of "Require e-mail verification when a visitor creates an
+ * account." Since we are logging in using Google, today, there isn't a use
+ * case that justifies implementing this setting.
  */
 function gauth_login_gauth_google_response() {
-  if (isset($_GET['state'])) {
-    $state = $_GET['state'];
-    if ($state != $_SESSION['gauth_login_state']) {
-      return new Response('Invalid state parameter', 401);
-    }
-    if (isset($_GET['code'])) {
-      $client_id = variable_get('gauth_login_client_id');
-      $client_secret = variable_get('gauth_login_client_secret');
-      $api_key = variable_get('gauth_login_developer_key');
-      $client = new Google_Client();
-      $client->setApplicationName("Google OAuth2");
-      $client->setClientId($client_id);
-      $client->setClientSecret($client_secret);
-      $client->setRedirectUri(url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)));
-      $client->setDeveloperKey($api_key);
-      $client->addService('oauth2', 'v2');
-      $client->authenticate($_GET['code']);
-      $account['access_token'] = $client->getAccessToken();
+  // ** Workaround destination functionality **
+  // Restore the destination if available. This is a workaround due to the
+  // Authorized redirect URIs for Google OAuth not accepting a destination
+  // parameter.
+  $destination = variable_get('gauth_login_destination', '');
 
-      $client = new Google_Client();
-      $client->setApplicationName("Google OAuth2");
-      $client->setClientId($client_id);
-      $client->setClientSecret($client_secret);
-      $client->setRedirectUri(url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)));
-      $client->setDeveloperKey($api_key);
-      $client->setAccessToken($account['access_token']);
-      $client->addService('oauth2', 'v2');
-      $oauth = new Google_Oauth2Service($client);
-      $info = $oauth->userinfo->get();
-      if ($uid = gauth_login_load_google_id($info['id'])) {
-        $form_state['uid'] = $uid;
-        user_login_submit(array(), $form_state);
-      }
-      else {
-        $account['client_id'] = variable_get('gauth_login_client_id');
-        $account['client_secret'] = variable_get('gauth_login_client_secret');
-        $account['developer_key'] = variable_get('gauth_login_developer_key');
-        $account['services'] = 'oauth2';
-        $account['is_authenticated'] = TRUE;
-
-        if (!$new_user = gauth_login_find_existing_user($info)) {
-          $user = new stdClass();
-          $user->mail = $info['email'];
-          $user->name = user_load_by_name($info['name']) ? $info['name'] . time() : $info['name'];
-          $user->is_new = TRUE;
-          $user->status = 1;
-          $new_user = user_save($user);
-        }
-        $form_state['uid'] = $new_user->uid;
-        user_login_submit(array(), $form_state);
-        global $user;
-        $token = drupal_hash_base64(drupal_random_bytes(55));
-        $_SESSION['pass_reset_' . $user->uid] = $token;
-        drupal_set_message(t("Click <a href=@url target=_blank>here</a> to set password", array('@url' => url('user/' . $user->uid . '/edit', array('query' => array('pass-reset-token' => $token))))), 'warning');
-        $gauth_login = array(
-          'google_id' => $info['id'],
-          'uid' => $user->uid
-        );
-        drupal_write_record('gauth_login', $gauth_login);
-        $account['name'] = 'Gauth Login ' . $user->uid;
-        $account['uid'] = $user->uid;
-        drupal_write_record('gauth_accounts', $account);
-      }
-    }
+  // Need the state. Return to destination if empty.
+  if (empty($_GET['state'])) {
+    drupal_goto($destination);
   }
-  drupal_goto();
+
+  // Return access denied if states don't match.
+  $state = $_GET['state'];
+  if ($state != $_SESSION['gauth_login_state']) {
+    // Set the user message.
+    drupal_set_message('Invalid value. Please contact your administrator.', 'error');
+
+    // Create a watchdog message.
+    $message = t('State and session values do not match: %state|%session', array(
+      '%state' => $state,
+      '%session' => $_SESSION['gauth_login_state'],
+    ));
+
+    // Watchdog log.
+    watchdog('gauth_login', $message, array(), WATCHDOG_WARNING);
+
+    // Deny access.
+    drupal_access_denied();
+
+    return;
+  }
+
+  // If code for authentication is empty, return to destination.
+  if (empty($_GET['code'])) {
+    drupal_goto($destination);
+  }
+
+  // Get the access token.
+  $client_id = variable_get('gauth_login_client_id');
+  $client_secret = variable_get('gauth_login_client_secret');
+  $api_key = variable_get('gauth_login_developer_key');
+  $client = new Google_Client();
+  $client->setApplicationName('Google OAuth2');
+  $client->setClientId($client_id);
+  $client->setClientSecret($client_secret);
+  $client->setRedirectUri(url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)));
+  $client->setDeveloperKey($api_key);
+  $scopes = gauth_google_services_scopes();
+  $client->addScope($scopes['oauth2']);
+  $client->authenticate($_GET['code']);
+  $account['access_token'] = $client->getAccessToken();
+
+  // Get the Google account.
+  $client = new Google_Client();
+  $client->setApplicationName('Google OAuth2');
+  $client->setClientId($client_id);
+  $client->setClientSecret($client_secret);
+  $client->setRedirectUri(url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)));
+  $client->setDeveloperKey($api_key);
+  $client->setAccessToken($account['access_token']);
+  $scopes = gauth_google_services_scopes();
+  $client->addScope($scopes['oauth2']);
+  $oauth = new Google_Service_Oauth2($client);
+  $info = $oauth->userinfo->get();
+
+  // Find the Drupal uid based upon the Google account id.
+  $uid = gauth_login_load_google_id($info['id']);
+
+  // If Drupal uid found in gauth_accounts, already logged in using Google
+  // before and Drupal uid is linked to the Google account. No Drupal user
+  // creation required.
+  if ($uid) {
+    // Set the Drupal uid and try to login.
+    $form_state = array(
+      'uid' => $uid,
+    );
+    user_login_submit(array(), $form_state);
+
+    // See if Drupal user is blocked and log/display a message.
+    _gauth_login_is_user_blocked();
+
+    // Return to destination.
+    drupal_goto($destination);
+  }
+
+  // Google account not found. Try to find an existing Drupal user to link to
+  // this Google account. If no Drupal user found, create one...maybe.
+  //See below.
+
+  // Store account variable.
+  $account['client_id'] = variable_get('gauth_login_client_id');
+  $account['client_secret'] = variable_get('gauth_login_client_secret');
+  $account['developer_key'] = variable_get('gauth_login_developer_key');
+  $account['services'] = 'oauth2';
+  $account['is_authenticated'] = TRUE;
+
+  // Load an existing Drupal user using the Google account or by hooks using
+  // hook_gauth_login_find_existing_user(). Must return a Drupal user object or
+  // NULL.
+  $new_user = gauth_login_find_existing_user($info);
+
+  // Set the password reset feature/message to false.
+  $password_reset = FALSE;
+
+  // NOTE: variable_get('user_register') could return NULL for so
+  // 0 == NULL is TRUE. This is probably ok since if user_register is NULL, it's
+  // not set and we most likely don't want allow adding of Drupal users.
+
+  // If a Drupal user wasn't found and admin register only, don't create a
+  // Drupal user. It must be done manually by an administrator per the Drupal
+  // account settings.
+  if (empty($new_user) && USER_REGISTER_ADMINISTRATORS_ONLY == variable_get('user_register')) {
+    // Set the user message.
+    drupal_set_message(t('Please contact the administrator for an account on this system.'), 'warning');
+
+    // Create a watchdog message.
+    $message = t('Google login attempted by: %name|%email', array(
+      '%name' => isset($info['name']) ? $info['name'] : 'No Name',
+      '%email' => isset($info['email']) ? $info['email'] : 'No Email',
+    ));
+
+    // Watchdog log.
+    watchdog('gauth_login', $message);
+
+    // Return to destination.
+    drupal_goto($destination);
+  }
+
+  // If a Drupal user wasn't found, lets create one per the Drupal account
+  // settings.
+  if (empty($new_user)) {
+    $user = new stdClass();
+    $user->mail = $info['email'];
+    // Make sure no duplicate names.
+    $user->name = user_load_by_name($info['name']) ? $info['name'] . time() : $info['name'];
+    $user->is_new = TRUE;
+    // status = 0 handles the USER_REGISTER_VISITORS_ADMINISTRATIVE_APPROVAL
+    // and the default case which would be...always need approval.
+    $user->status = 0;
+    if (USER_REGISTER_VISITORS == variable_get('user_register')) {
+      // Visitors can register themselves.
+      $user->status = 1;
+      // Need to set password too.
+      $password_reset = TRUE;
+    }
+    $new_user = user_save($user);
+
+    // Create a watchdog message.
+    $message = t('Drupal account created: %name|%email|%blocked', array(
+      '%name' => $user->name,
+      '%email' => $user->mail,
+      '%blocked' => $user->status ? 'Not blocked' : 'Blocked',
+    ));
+
+    // Watchdog log.
+    watchdog('gauth_login', $message, array(), WATCHDOG_INFO);
+  }
+
+  // Set the Drupal uid from the user object.
+  $uid = $new_user->uid;
+
+  // Set the Drupal uid and try to login.
+  $form_state = array(
+    'uid' => $uid,
+  );
+  user_login_submit(array(), $form_state);
+
+  // If the Drupal user is blocked, goto to the destination and don't continue
+  // processing.
+  if (_gauth_login_is_user_blocked()) {
+    drupal_goto($destination);
+  }
+
+  // Only prompt for a password reset only if visitors can register
+  // themselves. Otherwise, once the admin gives approval (unblocked),
+  // have them do a password reset.
+  if ($password_reset) {
+    $token = drupal_hash_base64(drupal_random_bytes(55));
+    $_SESSION['pass_reset_' . $uid] = $token;
+    drupal_set_message(t("Click <a href=@url target=_blank>here</a> to set a password for your account.", array('@url' => url('user/' . $uid . '/edit', array('query' => array('pass-reset-token' => $token))))), 'warning');
+  }
+
+  // Save the Drupal user to Google account link to the gauth_login table.
+  $gauth_login = array(
+    'google_id' => $info['id'],
+    'uid' => $uid
+  );
+  drupal_write_record('gauth_login', $gauth_login);
+
+  // Save Google account data to the gauth_accounts table.
+  $account['name'] = 'Gauth Login ' . $uid;
+  $account['uid'] = $uid;
+  drupal_write_record('gauth_accounts', $account);
+
+  // Return to destination.
+  drupal_goto($destination);
 }
 
 /**
@@ -154,7 +319,7 @@ function gauth_login_form_alter(&$form, &$form_state, $form_id) {
 }
 
 /**
- * Login using google, submit handler
+ * Login using Google, submit handler.
  */
 function gauth_login_user_login_submit() {
   if (variable_get('gauth_login_client_id', FALSE)) {
@@ -169,7 +334,8 @@ function gauth_login_user_login_submit() {
     $client->setClientSecret(variable_get('gauth_login_client_secret'));
     $client->setRedirectUri(url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)));
     $client->setDeveloperKey(variable_get('gauth_login_developer_key'));
-    $client->addService('oauth2', 'v2');
+    $scopes = gauth_google_services_scopes();
+    $client->addScope($scopes['oauth2']);
     if (!isset($_SESSION['gauth_login_state'])) {
       $state = md5(rand());
     }
@@ -179,8 +345,18 @@ function gauth_login_user_login_submit() {
     $_SESSION['gauth_login_state'] = $state;
     $client->setState($state);
     $url = 'https://accounts.google.com/o/oauth2/auth?response_type=code&redirect_uri=' . url('gauth/response_handler', array('https' => TRUE, 'absolute' => TRUE)) . '&client_id=' . variable_get('gauth_login_client_id') . '&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&access_type=offline&state=' . $_SESSION['gauth_login_state'];
+    // ** Workaround destination functionality **
+    // Since the Authorized redirect URIs for Google OAuth will not work with
+    // the destination query parameter (meaning adding ?destination=node/3 to
+    // the redirect_uri), we need to simulate the goto destination by storing
+    // the URI. Then, in hook_gauth_google_response(), use the variable to
+    // set the destination.
     if (isset($_GET['destination'])) {
+      variable_set('gauth_login_destination', $_GET['destination']);
       unset($_GET['destination']);
+    }
+    else {
+      variable_set('gauth_login_destination', NULL);
     }
     drupal_goto($url);
   }
@@ -190,7 +366,9 @@ function gauth_login_user_login_submit() {
 }
 
 /**
- * Function returns uid of passed google id
+ * Function returns uid & name of passed Google ID.
+ * @param $id
+ * @return int|bool
  */
 function gauth_login_load_google_id($id) {
   $rs = db_select('gauth_login', 'gl')
@@ -202,7 +380,7 @@ function gauth_login_load_google_id($id) {
 }
 
 /**
- * Implmenentation of hook_user_delete();
+ * Implementation of hook_user_delete().
  */
 function gauth_login_user_delete($user) {
   db_delete('gauth_login')

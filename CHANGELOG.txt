@@ -1,0 +1,10 @@
+gauth 7.x-1.x-dev, 2015-06-26
+-------------------------------
+- Applied path from issue: https://www.drupal.org/node/2486697. Added logging.
+- Added support to honor People > Account settings > Registration and
+  Cancellation settings.
+- Added support to honor Drupal destination URI.
+- Added support for OAuth2 and Google Service accounts.
+- Applied path from issue: https://www.drupal.org/node/2440517
+- Applied 7.x-1.x-dev 2014-Aug-28.
+- Committed gauth version 7.x-1.4.

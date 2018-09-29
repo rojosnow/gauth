@@ -88,11 +88,39 @@ function gauth_menu() {
  */
 function gauth_theme() {
   return array(
+    // Theme for global Google Developers Console help message.
+    'gauth_google_developers_console_help' => array(
+      'variables' => array(),
+    ),
     // Theme functions in gauth.admin.inc.
     'gauth_account_list' => array(
       'variables' => array('accounts' => NULL),
     ),
   );
+}
+
+/**
+ * Google Developers Console help message used in all modules.
+ * @param array $variables
+ * @return string
+ */
+function theme_gauth_google_developers_console_help($variables) {
+  $build = array();
+  $build['google_developers_console_help'] = array(
+    '#prefix' => '<p>',
+    '#markup' => t('The values for the fields below can be found in the
+      <a href="@url_console" target="_blank">Google Developers Console</a>.
+      Click on your Project Name then click API & auth, Credentials. If you
+      don\'t have an existing account, Client ID, or project, please see the
+      <a href="@url_help" target="_blank">Google Developers Console Help</a>.',
+      array(
+        '@url_console' => url('https://console.developers.google.com'),
+        '@url_help' => url('https://developers.google.com/console/help/new'),
+      )
+    ),
+    '#suffix' => '</p>',
+  );
+  return render($build);
 }
 
 /**
@@ -102,13 +130,13 @@ function gauth_libraries_info() {
   $path = libraries_get_path('google-api-php-client');
   set_include_path($path."/src/" . PATH_SEPARATOR . get_include_path());
   $libraries['google-api-php-client'] = array(
-    'name' => 'Google OAuth2 Library',
-    'vendor url' => 'http://code.google.com/p/google-api-php-client',
-    'download url' => 'http://github.com/google/google-api-php-client/archive/master.zip',
+    'name' => 'Google APIs Client Library for PHP',
+    'vendor url' => 'https://github.com/google/google-api-php-client',
+    'download url' => 'https://github.com/google/google-api-php-client',
     'version arguments' => array(
       'file' => 'src/Google/Client.php',
-      'pattern' => '/LIBVER = "([0-9\.a-z]+)/',
-      'lines' => 40,
+      'pattern' => '/LIBVER = "([0-9\.a-z]+)/', //LIBVER = "1.1.4";
+      'lines' => 50,
     ),
     'versions' => array(
       '1.0.5-beta' => array(),
@@ -118,6 +146,29 @@ function gauth_libraries_info() {
         'src/Google/Client.php',
       ),
     ),
+//    'versions' => array(
+//      '1.0.5-beta' => array(
+//        'files' => array(
+//          'php' => array(
+//            'src/Google/Client.php',
+//          ),
+//        ),
+//      ),
+//      '1.1.4' => array(
+//        'files' => array(
+//          'php' => array(
+//            'src/Google/Client.php',
+//          ),
+//        ),
+//      ),
+//      '1.1.5' => array(
+//        'files' => array(
+//          'php' => array(
+//            'src/Google/Client.php',
+//          ),
+//        ),
+//      ),
+//    ),
   );
   return $libraries;
 }
